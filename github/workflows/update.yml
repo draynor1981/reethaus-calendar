@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   update:
@@ -21,11 +22,42 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Keep a copy of the current feed
+        run: cp reethaus.ics old.ics 2>/dev/null || true
+
       - name: Run scraper
         run: python scraper.py
 
+      - name: Detect new events
+        id: diff
+        run: |
+          python new_events.py old.ics reethaus.ics > new_events.txt
+          if [ -s new_events.txt ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            cat new_events.txt
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No new events."
+          fi
+
+      - name: Open notification issue
+        if: steps.diff.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="New Reethaus event(s) added $(date -u +%d.%m.%Y)"
+          {
+            echo "The calendar feed picked up new events:"
+            echo ""
+            cat new_events.txt
+            echo ""
+            echo "Details: https://slowness.com/calendar/"
+          } > issue_body.txt
+          gh issue create --title "$TITLE" --body-file issue_body.txt
+
       - name: Commit updated feed
         run: |
+          rm -f old.ics new_events.txt issue_body.txt
           git config user.name "reethaus-bot"
           git config user.email "actions@users.noreply.github.com"
           git add reethaus.ics
